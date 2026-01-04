@@ -1,0 +1,100 @@
+# 策略配置
+
+# 筛选模式: strict (严格) / relaxed (宽松)
+filter_mode: "relaxed"
+
+# 池子筛选条件 (核心竞争力)
+filter:
+  # 24小时交易量 (USD)
+  volume_24h:
+    min: 500000           # 最小 $500K (避开死池)
+    max: 5000000          # 最大 $5M (避开大资金池)
+  
+  # 订单簿深度 (±0.5% 价格范围内的流动性)
+  depth_05pct:
+    min: 10000            # 最小 $10K
+    max: 100000           # 最大 $100K
+  
+  # 资金费率阈值
+  funding_rate:
+    min_abs: 0.0003       # 最小绝对值 0.03%
+    # 高费率机会阈值
+    high_rate: 0.001      # 0.1% 视为高费率
+    extreme_rate: 0.003   # 0.3% 视为极端费率
+  
+  # 现货-合约价差
+  spread:
+    max: 0.001            # 最大 0.1%
+  
+  # 负费率套利开关 (是否允许做多合约+做空现货)
+  # 目前代码未实现借币逻辑，建议保持 false
+  allow_negative_rates: false
+
+  # 排除列表 (不稳定或有特殊规则的币种)
+  blacklist:
+    - "LUNA"
+    - "UST"
+    - "FTT"
+
+# 宽松模式筛选条件 (发现更多机会，风险稍高)
+filter_relaxed:
+  volume_24h:
+    min: 100000           # 最小 $100K
+    max: 1000000000       # 最大 $10B (彻底放开)
+  depth_05pct:
+    min: 3000             # 最小 $3K
+  funding_rate:
+    min_abs: 0.0001       # 最小绝对值 0.01%
+  spread:
+    max: 0.005            # 最大 0.5%
+
+# 资金轮动策略 (骑驴找马)
+rotation:
+  enabled: true           # 是否开启轮动
+  min_profit_threshold: 0 # 最小盈利要求 (0 表示回本即可换仓)
+  min_rate_improvement: 0.0005 # 费率提升要求 (新机会需高出 0.05%)
+
+# 仓位管理
+position:
+  # 杠杆设置
+  leverage:
+    default: 2            # 默认杠杆
+    max: 3                # 最大杠杆
+  
+  # Delta 中性容忍度
+  delta_tolerance: 0.02   # 2% 偏差
+  
+  # 持仓时间
+  min_hold_periods: 3     # 最少持仓期数 (覆盖手续费)
+  max_hold_periods: 24    # 最长持仓期数 (避免过度暴露)
+
+# 风险控制
+risk:
+  # 保证金率阈值
+  margin_ratio:
+    warning: 0.5          # 50% 时警告
+    danger: 0.35          # 35% 时减仓
+    close: 0.25           # 25% 时强制平仓
+  
+  # 亏损控制
+  max_loss:
+    per_trade: 0.02       # 单笔最大亏损 2%
+    daily: 0.05           # 日最大亏损 5%
+    total: 0.10           # 总最大亏损 10%
+  
+  # 费率反转
+  rate_reversal:
+    watch_periods: 2      # 观察期数
+    threshold: 0.0001     # 反转阈值 0.01%
+  
+  # 紧急情况
+  emergency:
+    price_spike: 0.05     # 5% 价格剧烈波动
+    api_timeout: 10       # API 超时秒数
+
+# 收益计算参数
+profit:
+  # 盈亏平衡分析
+  breakeven_buffer: 1.2   # 至少超过盈亏平衡 20%
+  # 复利再投资
+  reinvest_threshold: 50  # 超过 $50 利润时再投资

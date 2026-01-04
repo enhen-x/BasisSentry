@@ -1,0 +1,56 @@
+# 交易所配置
+# 注意: API Key 请勿提交到 Git，使用环境变量或 .env 文件
+
+exchanges:
+  binance:
+    enabled: true
+    priority: 1
+    # API 配置 (可通过环境变量覆盖: BINANCE_API_KEY, BINANCE_SECRET)
+    api_key: ""
+    secret: ""
+    # 是否使用测试网
+    testnet: false
+    # 费率结构
+    fees:
+      spot_taker: 0.001    # 现货 Taker 0.1%
+      spot_maker: 0.001    # 现货 Maker 0.1%
+      perp_taker: 0.0004   # 合约 Taker 0.04%
+      perp_maker: 0.0002   # 合约 Maker 0.02%
+    # API 限制
+    rate_limit:
+      requests_per_second: 10
+      weight_per_minute: 1200
+
+  bybit:
+    enabled: false
+    priority: 2
+    api_key: ""
+    secret: ""
+    testnet: true
+    fees:
+      spot_taker: 0.001
+      spot_maker: 0.001
+      perp_taker: 0.00055
+      perp_maker: 0.0002
+    rate_limit:
+      requests_per_second: 10
+      weight_per_minute: 600
+
+  okx:
+    enabled: false
+    priority: 3
+    api_key: ""
+    secret: ""
+    passphrase: ""
+    testnet: true
+    fees:
+      spot_taker: 0.001
+      spot_maker: 0.0008
+      perp_taker: 0.0005
+      perp_maker: 0.0002
+    rate_limit:
+      requests_per_second: 10
+      weight_per_minute: 600
+
+# 默认交易所
+default_exchange: "binance"

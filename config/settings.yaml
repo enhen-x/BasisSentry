@@ -1,0 +1,37 @@
+# 全局配置
+capital:
+  initial: 1000           # 初始资金 USDT
+  max_position_ratio: 0.8 # 最大仓位比例 (80%)
+  reserve_ratio: 0.2      # 保留资金比例 (20%)
+  max_single_ratio: 0.3   # 单币种最大占比 (30%)
+
+# 交易时间 (东一区 UTC+1)
+trading_hours:
+  timezone: "Europe/Paris"
+  start: "08:00"
+  end: "22:00"
+  # 资金费率结算时间 (UTC): 00:00, 08:00, 16:00
+  # 对应东一区时间: 01:00, 09:00, 17:00
+
+# 执行参数
+execution:
+  scan_interval: 60       # 扫描间隔（秒）
+  order_timeout: 30       # 下单超时（秒）
+  max_retries: 3          # 最大重试次数
+  confirm_delay: 5        # 订单确认等待（秒）
+
+# 日志配置
+logging:
+  level: "INFO"           # DEBUG, INFO, WARNING, ERROR
+  file: "logs/arbitrage.log"
+  rotation: "10 MB"       # 单文件最大大小
+  retention: "7 days"     # 日志保留时间
+
+# 通知配置
+notification:
+  telegram:
+    enabled: false
+    bot_token: ""
+    chat_id: ""
+  # 告警级别: all, warning, error
+  alert_level: "warning"
