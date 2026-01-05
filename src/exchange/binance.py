@@ -124,6 +124,38 @@ class BinanceAdapter(ExchangeBase):
         except Exception as e:
             logger.error(f"获取所有资金费率失败: {e}")
             raise
+
+    async def get_funding_history(self, since: Optional[int] = None, limit: int = 200) -> list[dict]:
+        """获取资金费流水 (资金费结算明细)"""
+        try:
+            rows = await self.perp.fetch_funding_history(symbol=None, since=since, limit=limit)
+            payments = []
+            for r in rows or []:
+                ts = r.get("timestamp") or r.get("info", {}).get("time")
+                ts_dt = datetime.fromtimestamp(ts / 1000) if ts else datetime.now()
+
+                raw_rate = (
+                    r.get("info", {}).get("fundingRate")
+                    if isinstance(r.get("info"), dict)
+                    else None
+                )
+                rate = Decimal(str(raw_rate if raw_rate is not None else r.get("fundingRate", 0)))
+
+                payments.append(
+                    {
+                        "symbol": r.get("symbol"),
+                        "income": Decimal(str(r.get("amount", 0))),
+                        "rate": rate,
+                        "position_value": Decimal(0),
+                        # 用 ISO 字符串方便去重
+                        "timestamp": ts_dt.isoformat(),
+                    }
+                )
+
+            return payments
+        except Exception as e:
+            logger.error(f"获取资金流水失败: {e}")
+            return []
     
     async def get_orderbook(self, symbol: str, limit: int = 20) -> OrderBook:
         """获取订单簿"""

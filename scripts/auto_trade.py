@@ -6,7 +6,7 @@ import asyncio
 import sys
 from pathlib import Path
 from decimal import Decimal
-from datetime import datetime
+from datetime import datetime, timedelta
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
@@ -45,18 +45,65 @@ class AutoTrader:
         self.risk_manager = None
         self.running = True
         self.last_funding_check = datetime.now()
+
+    async def sync_funding_history(self):
+        """从交易所同步资金费流水到本地"""
+        if not hasattr(self.exchange, "get_funding_history"):
+            logger.warning("当前交易所未实现资金流水同步")
+            return
+
+        since_ms = int((datetime.utcnow() - timedelta(days=3)).timestamp() * 1000)
+        try:
+            payments = await self.exchange.get_funding_history(since=since_ms, limit=500)
+            added = funding_tracker.sync_remote_payments(payments)
+            logger.info(f"资金流水同步完成，新增 {added} 条记录")
+        except Exception as e:
+            logger.error(f"同步资金流水失败: {e}")
     
     async def _get_portfolio_status(self):
         """
         获取投资组合综合状态 (余额、收入、持仓价值、累计收益、回本周期)
         """
-        # 1. 获取余额
-        spot_bal = await self.exchange.get_spot_balance("USDT")
-        perp_bal = await self.exchange.get_perp_balance("USDT")
-        total_bal = spot_bal + perp_bal
+        # 1. 获取现货/合约余额并换算总权益
+        spot_balances = await self.exchange.spot.fetch_balance()
+        perp_balances = await self.exchange.perp.fetch_balance()
+
+        spot_equity = Decimal("0")
+        for asset, bal in spot_balances.items():
+            if not isinstance(bal, dict):
+                continue
+            qty = Decimal(str(bal.get("total", 0)))
+            if qty == 0:
+                continue
+            if asset == "USDT":
+                spot_equity += qty
+            else:
+                try:
+                    ticker = await self.exchange.spot.fetch_ticker(f"{asset}/USDT")
+                    price = Decimal(str(ticker["last"]))
+                    spot_equity += qty * price
+                except Exception:
+                    continue
+
+        # 合约账户权益 (钱包余额 + 未实现盈亏更稳妥；若接口无该字段则退回 total)
+        perp_wallet = Decimal(str(perp_balances.get("USDT", {}).get("total", 0)))
+        perp_unrealized = Decimal("0")
+        try:
+            perp_positions = await self.exchange.perp.fetch_positions()
+            for p in perp_positions:
+                pnl = Decimal(str(p.get("unRealizedProfit") or p.get("info", {}).get("unRealizedProfit") or 0))
+                perp_unrealized += pnl
+        except Exception:
+            pass
+        perp_equity = perp_wallet + perp_unrealized
+
+        spot_bal = Decimal(str(spot_balances.get("USDT", {}).get("free", 0)))
+        perp_bal = Decimal(str(perp_balances.get("USDT", {}).get("free", 0)))
+        total_bal = spot_equity + perp_equity
         
         # 2. 获取收入统计
         summary = funding_tracker.get_summary()
+        funding_sum_positions = Decimal("0")
         
         # 3. 计算持仓信息
         total_net_pnl = Decimal("0")
@@ -78,15 +125,27 @@ class AutoTrader:
         for symbol, pos in self.executor.positions.items():
             managed_symbols.add(symbol)
             try:
-                # A. 计算持仓价值
+                # A. 计算持仓价值（现货与合约分别）
                 spot_symbol = f"{pos.base_currency}/USDT"
                 ticker = await self.exchange.spot.fetch_ticker(spot_symbol)
                 current_price = Decimal(str(ticker['last']))
-                position_value = pos.spot_qty * current_price
+                # 优先用交易所实际合约数量估算名义价值，避免本地记录不一致
+                actual_perp_qty = pos.perp_qty
+                if symbol in perp_map:
+                    actual_perp_qty = Decimal(str(perp_map[symbol]['info']['positionAmt']))
+                spot_total_qty = Decimal(str(spot_balances.get(pos.base_currency, {}).get('total', 0)))
+                spot_value = spot_total_qty * current_price
+                perp_value = abs(actual_perp_qty) * current_price
+                position_value = perp_value
                 total_position_value += position_value
                 
                 # B. 获取累计费率收益 (从 funding_tracker 获取)
                 funding_earned = funding_tracker.get_total_income(symbol)
+                funding_sum_positions += funding_earned
+
+                # 手续费估算（现货0.1%*2 + 合约0.05%*2 ≈0.3%名义仓位）
+                total_fees = position_value * Decimal("0.003")
+                net_income_after_fee = funding_earned - total_fees
                 
                 # C. 获取当前费率
                 rate_info = self.scanner.get_cached_rate(symbol)
@@ -134,7 +193,12 @@ class AutoTrader:
                 details.append({
                     'symbol': symbol,
                     'position_value': position_value,
+                    'spot_value': spot_value,
+                    'perp_value': perp_value,
+                    'spot_qty': spot_total_qty,
+                    'perp_qty': actual_perp_qty,
                     'funding_earned': funding_earned,
+                    'net_income_after_fee': net_income_after_fee,
                     'current_rate': current_rate,
                     'net_per_period': net_per_period,
                     'payback_by_income': payback_text,
@@ -177,9 +241,12 @@ class AutoTrader:
         return {
             "spot_bal": spot_bal,
             "perp_bal": perp_bal,
+            "spot_equity": spot_equity,
+            "perp_equity": perp_equity,
             "total_bal": total_bal,
             "total_income": summary["total_income"],
             "today_income": summary["today_income"],
+            "funding_sum_positions": funding_sum_positions,
             "total_pnl": total_net_pnl,
             "total_position_value": total_position_value,
             "details": details,
@@ -334,6 +401,8 @@ class AutoTrader:
         
         # 同步未托管的持仓
         await self.sync_orphan_positions()
+        # 同步交易所资金流水到本地
+        await self.sync_funding_history()
         
         # 检查账户状态并发送报告
         try:

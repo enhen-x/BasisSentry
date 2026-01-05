@@ -191,11 +191,14 @@ class TelegramNotifier:
         estimated_pnl: Decimal = Decimal("0"),
         position_details: list = None,
         total_income: Decimal = Decimal("0"),
+        spot_equity: Decimal = Decimal("0"),
+        perp_equity: Decimal = Decimal("0"),
+        funding_sum_positions: Decimal = Decimal("0"),
     ) -> bool:
         """
         发送启动状态报告
         """
-        total_balance = spot_balance + perp_balance
+        total_balance = spot_equity + perp_equity if (spot_equity or perp_equity) else spot_balance + perp_balance
         # 简单估算收益率: 总收入 / 总权益 (注意: 这不是严谨的 ROI，仅供参考)
         yield_rate = (total_income / total_balance * 100) if total_balance > 0 else Decimal(0)
         
@@ -204,6 +207,8 @@ class TelegramNotifier:
             f"💰 <b>账户资产</b>\n"
             f"  • 总权益: <code>${total_balance:.2f}</code>\n"
             f"  • 累计收益: <code>${total_income:.4f}</code>\n"
+            f"  • 现货权益: <code>${spot_equity if spot_equity else spot_balance:.2f}</code>\n"
+            f"  • 合约权益: <code>${perp_equity if perp_equity else perp_balance:.2f}</code>\n"
             f"  • 收益率: <code>{yield_rate:.2f}%</code>\n\n"
             f"📊 <b>持仓概览</b>\n"
             f"  • 持仓数量: <code>{positions_count}</code>\n"
@@ -216,9 +221,16 @@ class TelegramNotifier:
         if position_details:
             text += f"\n📝 <b>持仓明细</b>\n"
             for p in position_details:
-                # p = {'symbol', 'pnl', 'net_profit', 'managed', ...}
-                payback = p.get('payback', 'N/A')
-                net_profit = p.get('net_profit', p['pnl']) # fallback
+                # p = {'symbol', 'pnl', 'net_profit', 'managed', 'payback_by_income', ...}
+                payback = p.get('payback') or p.get('payback_by_income', 'N/A')
+                # 仅展示资金费收益，避免价格波动干扰
+                net_profit = p.get('funding_earned', Decimal(0))
+                pos_value = p.get('position_value', Decimal(0))
+                spot_value = p.get('spot_value', Decimal(0))
+                perp_value = p.get('perp_value', Decimal(0))
+                net_income_after_fee = p.get('net_income_after_fee', Decimal(0))
+                current_rate = p.get('current_rate', Decimal(0))
+                net_after_fee = p.get('net_per_period', Decimal(0))
                 status_emoji = "🟢" if net_profit >= 0 else "⏳"
                 
                 # 未托管警告
@@ -229,8 +241,21 @@ class TelegramNotifier:
                 text += (
                     f"  • <b>{p['symbol']}</b> {status_emoji}\n"
                     f"    净赚: <code>${net_profit:+.4f}</code> (含费/息)\n"
+                    f"    现货金额: <code>${spot_value:.2f}</code>\n"
+                    f"    合约金额: <code>${perp_value:.2f}</code>\n"
+                    f"    名义金额: <code>${pos_value:.2f}</code>\n"
+                    f"    当前费率: <code>{current_rate*100:+.4f}%</code>\n"
+                    f"    累计费率收益: <code>${net_profit:+.4f}</code>\n"
+                    f"    当前收益(扣双边手续费): <code>${net_income_after_fee:+.4f}</code>\n"
+                    f"    净收益(扣手续费): <code>${net_after_fee:+.4f}</code>/期\n"
                     f"    回本: {payback}\n"
                 )
+
+        if funding_sum_positions:
+            text += (
+                f"\n📈 累计费率收益 (托管持仓合计): <code>${funding_sum_positions:.4f}</code>\n"
+                f"📒 累计收益(日志总计): <code>${total_income:.4f}</code>\n"
+            )
 
         text += f"\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         

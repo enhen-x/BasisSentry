@@ -195,6 +195,57 @@ class FundingTracker:
             "total_records": len(records),
             "by_symbol": by_symbol,
         }
+
+    def sync_remote_payments(self, payments: list[dict]) -> int:
+        """合并交易所资金流水到本地记录，避免重复"""
+        if not payments:
+            return 0
+
+        records = self._load_records()
+        existing_keys = {
+            (r["symbol"], r.get("timestamp"), r.get("income")) for r in records
+        }
+
+        added = 0
+        for p in payments:
+            symbol = p.get("symbol")
+            ts = p.get("timestamp")
+            income = Decimal(str(p.get("income", 0)))
+            rate = Decimal(str(p.get("rate", 0)))
+            position_value = Decimal(str(p.get("position_value", 0)))
+
+            # 支持 datetime 或 ISO 字符串
+            if isinstance(ts, datetime):
+                ts_iso = ts.isoformat()
+            elif isinstance(ts, str):
+                ts_iso = ts
+            else:
+                # 无效时间戳，跳过
+                continue
+
+            key = (symbol, ts_iso, str(income))
+            if key in existing_keys:
+                continue
+
+            existing_keys.add(key)
+            added += 1
+            records.append(
+                FundingRecord(
+                    symbol=symbol,
+                    rate=rate,
+                    position_value=position_value,
+                    income=income,
+                    timestamp=datetime.fromisoformat(ts_iso)
+                    if isinstance(ts_iso, str)
+                    else ts,
+                ).to_dict()
+            )
+
+        if added:
+            self._save_records(records)
+            logger.info(f"已从交易所资金流水同步 {added} 条记录")
+
+        return added
     
     def _load_records(self) -> list[dict]:
         """加载记录"""
